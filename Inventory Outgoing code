@@ -3,26 +3,34 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Food Outgoing Log</title>
+  <title>Meal Planner</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
-  background-color: #74161F;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='130' height='130' viewBox='0 0 130 130'%3E%3Cg fill='none' stroke='%23FBF5ED' stroke-opacity='0.1' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M24 40h26a3 3 0 0 1 3 3v10a16 16 0 0 1-32 0V43a3 3 0 0 1 3-3Z'/%3E%3Cpath d='M19 46h-5M56 46h5'/%3E%3Cpath d='M78 92h30a20 20 0 0 1-30 0Z'/%3E%3Cpath d='M83 72c0 3-3 3-3 6M93 70c0 3-3 3-3 6M103 72c0 3-3 3-3 6'/%3E%3C/g%3E%3C/svg%3E");
+  background-color: #FBF5ED;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='130' height='130' viewBox='0 0 130 130'%3E%3Cg fill='none' stroke='%236B1414' stroke-opacity='0.05' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M24 40h26a3 3 0 0 1 3 3v10a16 16 0 0 1-32 0V43a3 3 0 0 1 3-3Z'/%3E%3Cpath d='M19 46h-5M56 46h5'/%3E%3Cpath d='M78 92h30a20 20 0 0 1-30 0Z'/%3E%3Cpath d='M83 72c0 3-3 3-3 6M93 70c0 3-3 3-3 6M103 72c0 3-3 3-3 6'/%3E%3C/g%3E%3C/svg%3E");
   background-size: 130px 130px;
 
   color: #1a1a1a;
   min-height: 100vh;
   padding: 2rem 1rem;
 }
+    .container {
+      max-width: 560px;
+      margin: 0 auto;
+    }
+
+    header {
+  margin-bottom: 1.5rem;
+}
+
 .app-header {
   display: flex;
   align-items: center;
   gap: 15px;
-  margin-bottom: 1.5rem;
 }
 
 .logo {
@@ -31,71 +39,761 @@
   object-fit: contain;
 }
 
-    .container { max-width: 560px; margin: 0 auto; }
-
-    header { margin-bottom: 1.5rem; }
     header h1 {
-  font-size: 28px;
-  font-weight: 600;
-  letter-spacing: -0.5px;
-  color: #FBF5ED;
-}
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+      color: #1a1a1a;
+    }
 
-header p {
-  font-size: 14px;
-  color: rgba(251, 245, 237, 0.75);
-  margin-top: 4px;
-}
+    header p {
+      font-size: 14px;
+      color: #888;
+      margin-top: 4px;
+    }
 
     .page { display: none; }
     .page.active { display: block; }
 
-    /* ── Make Meal button ── */
-    .make-meal-btn {
+    .search-box {
+      position: relative;
+      margin-bottom: 1.25rem;
+    }
+
+    .search-box svg {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 15px;
+      height: 15px;
+      color: #bbb;
+      pointer-events: none;
+    }
+
+    .search-input {
       width: 100%;
+      font-size: 14px;
+      font-family: inherit;
+      color: #1a1a1a;
+      background: #fff;
+      border: 1px solid #e8e6e0;
+      border-radius: 10px;
+      padding: 10px 12px 10px 34px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .search-input:focus {
+      border-color: #c8c5be;
+    }
+
+    .search-input::placeholder {
+      color: #bbb;
+    }
+
+    .group-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #bbb;
+      margin: 18px 0 8px;
+    }
+
+    .group-label:first-child {
+      margin-top: 0;
+    }
+
+    .meal-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .meal-card {
+      background: #fff;
+      border: 1px solid #e8e6e0;
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .meal-card:hover {
+      border-color: #c8c5be;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    .meal-card.disabled {
+      cursor: default;
+      opacity: 0.5;
+    }
+
+    .meal-card.disabled:hover {
+      border-color: #e8e6e0;
+      box-shadow: none;
+    }
+
+    .meal-card-name {
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .meal-card-meta {
+      font-size: 12px;
+      color: #999;
+      margin-top: 2px;
+    }
+
+    .badge {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 10px;
+      border-radius: 20px;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-left: 12px;
+    }
+
+    .badge-ready {
+      background: #e6f4ec;
+      color: #2d7a4f;
+    }
+
+    .badge-soon {
+      background: #f0efe9;
+      color: #aaa;
+    }
+
+    .badge-tag {
+      background: #eef0f6;
+      color: #5a6aa8;
+    }
+
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: #888;
+      background: #fff;
+      border: 1px solid #e8e6e0;
+      border-radius: 8px;
+      padding: 6px 14px;
+      cursor: pointer;
+      margin-bottom: 1.5rem;
+      transition: background 0.15s, color 0.15s;
+      text-decoration: none;
+    }
+
+    .back-btn:hover {
+      background: #f0efe9;
+      color: #444;
+    }
+
+    .back-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #bbb;
+      margin-bottom: 10px;
+    }
+
+    .ingredient-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ingredient-item {
+      background: #fff;
+      border: 1px solid #e8e6e0;
+      border-radius: 12px;
+      padding: 0.9rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .ingredient-item:hover {
+      border-color: #c8c5be;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    .ingredient-name {
+      font-size: 15px;
+      font-weight: 500;
+    }
+
+    .ingredient-hint {
+      font-size: 12px;
+      color: #bbb;
+      margin-top: 2px;
+    }
+
+    .search-icon {
+      color: #ccc;
+      flex-shrink: 0;
+      margin-left: 12px;
+    }
+
+    .search-icon svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .empty-state {
+      font-size: 14px;
+      color: #aaa;
+      text-align: center;
+      padding: 2rem 0;
+    }
+
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .modal-overlay.active { display: flex; }
+
+    .modal {
+      background: #fff;
+      border-radius: 16px;
+      padding: 1.75rem 1.5rem 1.5rem;
+      width: 100%;
+      max-width: 360px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.14);
+    }
+
+    .modal-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 4px;
+    }
+
+    .modal-subtitle {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 1.25rem;
+    }
+
+    .modal-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #bbb;
+      margin-bottom: 6px;
+    }
+
+    .modal-input {
+      width: 100%;
+      font-size: 20px;
+      font-weight: 500;
+      font-family: inherit;
+      color: #1a1a1a;
+      background: #f5f4f0;
+      border: 1.5px solid #e8e6e0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+      text-align: center;
+    }
+
+    .modal-input:focus { border-color: #1a1a1a; }
+    .modal-input.error { border-color: #d94f4f; }
+
+    .modal-error {
+      display: none;
+      font-size: 12px;
+      color: #d94f4f;
+      margin-top: 6px;
+      min-height: 16px;
+    }
+
+    .modal-error.active { display: block; }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 1.25rem;
+    }
+
+    .modal-cancel {
+      flex: 1;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: inherit;
+      color: #888;
+      background: #fff;
+      border: 1px solid #e8e6e0;
+      border-radius: 10px;
+      padding: 11px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .modal-cancel:hover { background: #f0efe9; }
+
+    .modal-submit {
+      flex: 2;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      color: #fff;
+      background: #1a1a1a;
+      border: none;
+      border-radius: 10px;
+      padding: 11px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .modal-submit:hover { background: #333; }
+
+    .modal-stepper {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .modal-stepper .modal-input {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .stepper-btn {
+      flex-shrink: 0;
+      width: 44px;
+      height: 44px;
+      font-size: 22px;
+      line-height: 1;
+      font-family: inherit;
+      color: #1a1a1a;
+      background: #f5f4f0;
+      border: 1.5px solid #e8e6e0;
+      border-radius: 10px;
+      cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      background: #c0392b;
+      transition: background 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+
+    .stepper-btn:hover {
+      background: #e8e6e0;
+      border-color: #c8c5be;
+    }
+
+    .stepper-btn:active {
+      background: #dddbd5;
+    }
+
+    /* Toast notification */
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #2d7a4f;
       color: #fff;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 600;
-      font-family: inherit;
-      border: none;
-      border-radius: 12px;
-      padding: 14px;
-      cursor: pointer;
-      margin-bottom: 1.25rem;
-      transition: background 0.15s;
+      padding: 10px 24px;
+      border-radius: 100px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 999;
+      white-space: nowrap;
     }
-    .make-meal-btn:hover { background: #a93226; }
-    .make-meal-btn svg { width: 18px; height: 18px; }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
 
-    /* ── Search ── */
-    .search-box { position: relative; margin-bottom: 1.25rem; }
-    .search-box svg {
-      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-      width: 15px; height: 15px; color: #bbb; pointer-events: none;
-    }
-    .search-input {
-      width: 100%; font-size: 14px; font-family: inherit; color: #1a1a1a;
-      background: #fff; border: 1px solid #e8e6e0; border-radius: 10px;
-      padding: 10px 12px 10px 34px; outline: none; transition: border-color 0.15s;
-    }
-    .search-input:focus { border-color: #c8c5be; }
-    .search-input::placeholder { color: #bbb; }
+  <div class="container">
+    <header class="app-header">
+  <img src="Anna-sudha-logo.webp"
+       alt="Anna Sudha Community Kitchens Logo"
+       class="logo">
 
-    /* ── Bin / ingredient cards ── */
-    .meal-list { display: flex; flex-direction: column; gap: 10px; }
+  <div>
+    <h1>Meal Planner</h1>
+    <p>Select a meal to view its ingredients</p>
+  </div>
+</header>
 
-    .meal-card {
-      background: #fff; border: 1px solid #e8e6e0; border-radius: 12px;
-      padding: 1rem 1.25rem; display: flex; align-items: center;
-      justify-content: space-between; cursor: pointer;
-      transition: border-color 0.15s, box-shadow 0.15s;
+    <div id="page-meals" class="page active">
+
+      <div class="search-box">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <circle cx="6.5" cy="6.5" r="4"/>
+          <path d="M10 10l3 3"/>
+        </svg>
+        <input type="text" class="search-input" id="search-input" placeholder="Search ingredients or meals..." oninput="renderMealList()">
+      </div>
+
+      <div id="meal-list-container"></div>
+
+    </div>
+
+    <div id="page-ingredients" class="page">
+
+      <button class="back-btn" onclick="showMeals()">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 3L5 8l5 5"/>
+        </svg>
+        Back
+      </button>
+
+      <div class="section-label" id="ingredients-title">Ingredients</div>
+
+      <div class="ingredient-list" id="ingredients-list"></div>
+
+    </div>
+
+  </div>
+
+
+  <!-- Quantity modal -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-title" id="modal-title">Enter Quantity</div>
+      <div class="modal-subtitle" id="modal-subtitle"></div>
+      <div class="modal-label" id="modal-label">Quantity</div>
+      <div class="modal-stepper">
+        <button class="stepper-btn" onclick="adjustQty(-1)" aria-label="Decrease">&#8722;</button>
+        <input type="number" class="modal-input" id="modal-qty-input" value="1" min="1" step="1">
+        <button class="stepper-btn" onclick="adjustQty(1)" aria-label="Increase">&#43;</button>
+      </div>
+      <div class="modal-error" id="modal-error"></div>
+      <div class="modal-actions">
+        <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+        <button class="modal-submit" onclick="submitModal()">Add to Intake</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden form for silent POST to Google Forms -->
+  <form id="gform" method="POST" target="hidden-iframe" style="display:none;"
+        action="https://docs.google.com/forms/d/e/1FAIpQLScbq73-sssNvXF9cnrz9Etls9AHHoQRiBmNlqwmDcB1lMNqRQ/formResponse">
+    <input type="hidden" name="entry.1583562329" id="gform-item">
+    <input type="hidden" name="entry.625410264"  id="gform-qty">
+  </form>
+  <iframe name="hidden-iframe" style="display:none;"></iframe>
+
+  <script>
+    const MEALS = [
+      { id: "pasta-noodles",      name: "Pasta & Noodles",           ready: true },
+      { id: "grains-flours",      name: "Grains & Flours",           ready: true },
+      { id: "dry-beans-legumes",  name: "Dry Beans & Legumes",       ready: true },
+      { id: "sauces",             name: "Sauces",                    ready: true },
+      { id: "spices-seasonings",  name: "Spices & Seasonings",       ready: true },
+      { id: "cooking-oils",       name: "Cooking Oils",              ready: true },
+      { id: "frozen-foods",       name: "Frozen Foods",              ready: true },
+      { id: "refrigerated-dairy", name: "Refrigerated Dairy",        ready: true },
+      { id: "tea-beverage",       name: "Tea & Beverage Ingredients",ready: true }
+    ];
+
+    const INGREDIENTS = [
+      // Pasta & Noodles
+      { name: "Penne", unit: "lbs",                  mealId: "pasta-noodles",      mealName: "Pasta & Noodles",        foodType: "Carbs" },
+      { name: "Elbows", unit: "lbs",                 mealId: "pasta-noodles",      mealName: "Pasta & Noodles",        foodType: "Carbs" },
+      { name: "Spaghetti", unit: "lbs",              mealId: "pasta-noodles",      mealName: "Pasta & Noodles",        foodType: "Carbs" },
+      { name: "Egg Noodles", unit: "lbs",            mealId: "pasta-noodles",      mealName: "Pasta & Noodles",        foodType: "Carbs" },
+
+      // Grains & Flours
+      { name: "Basmati Rice", unit: "lbs",           mealId: "grains-flours",      mealName: "Grains & Flours",        foodType: "Grains" },
+      { name: "Whole Wheat Flour", unit: "lbs",      mealId: "grains-flours",      mealName: "Grains & Flours",        foodType: "Grains" },
+      { name: "Besan (Gram Flour)", unit: "lbs",     mealId: "grains-flours",      mealName: "Grains & Flours",        foodType: "Grains" },
+
+      // Dry Beans & Legumes
+      { name: "Black Beans", unit: "lbs",            mealId: "dry-beans-legumes",  mealName: "Dry Beans & Legumes",    foodType: "Legume" },
+      { name: "Dry Chickpeas", unit: "lbs",          mealId: "dry-beans-legumes",  mealName: "Dry Beans & Legumes",    foodType: "Legume" },
+      { name: "Red Kidney Beans", unit: "lbs",       mealId: "dry-beans-legumes",  mealName: "Dry Beans & Legumes",    foodType: "Legume" },
+      { name: "Pinto Beans", unit: "lbs",            mealId: "dry-beans-legumes",  mealName: "Dry Beans & Legumes",    foodType: "Legume" },
+
+      // Sauces
+      { name: "Marinara", unit: "oz",               mealId: "sauces",             mealName: "Sauces",                 foodType: "Sauce" },
+      { name: "Alfredo", unit: "oz",                mealId: "sauces",             mealName: "Sauces",                 foodType: "Sauce" },
+
+      // Spices & Seasonings
+      { name: "Butter Chicken Masala", unit: "boxes",  mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Chole Masala", unit: "boxes",           mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Chaat Masala", unit: "boxes",           mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Coriander Powder", unit: "lbs",       mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Kashmiri Chili Powder", unit: "lbs",  mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Amchur Powder", unit: "lbs",          mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Asafoetida", unit: "bottles",             mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Garlic Powder", unit: "lbs",          mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Onion Powder", unit: "lbs",           mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Taco Seasoning", unit: "lbs",         mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Salt", unit: "lbs",                   mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+      { name: "Black Pepper", unit: "lbs",           mealId: "spices-seasonings",  mealName: "Spices & Seasonings",    foodType: "Spice" },
+
+      // Cooking Oils
+      { name: "Canola Oil", unit: "gallons",             mealId: "cooking-oils",       mealName: "Cooking Oils",           foodType: "Oil" },
+
+      // Frozen Foods
+      { name: "Mixed Frozen Vegetables", unit: "lbs",mealId: "frozen-foods",       mealName: "Frozen Foods",           foodType: "Frozen" },
+
+      // Refrigerated Dairy
+      { name: "Butter", unit: "quarts",                 mealId: "refrigerated-dairy", mealName: "Refrigerated Dairy",     foodType: "Dairy" },
+      { name: "Heavy Whipping Cream", unit: "quarts",   mealId: "refrigerated-dairy", mealName: "Refrigerated Dairy",     foodType: "Dairy" },
+      { name: "Whole Milk", unit: "gallons",             mealId: "refrigerated-dairy", mealName: "Refrigerated Dairy",     foodType: "Dairy" },
+
+      // Tea & Beverage Ingredients
+      { name: "Wagh Bakri Tea Powder", unit: "lbs",  mealId: "tea-beverage",       mealName: "Tea & Beverage Ingredients", foodType: "Beverage" },
+      { name: "Everest Tea Masala", unit: "boxes",     mealId: "tea-beverage",       mealName: "Tea & Beverage Ingredients", foodType: "Beverage" }
+    ];
+
+    let pendingIngredient = null;
+
+    function openModal(ingredientName) {
+      pendingIngredient = ingredientName;
+      document.getElementById('modal-subtitle').textContent = ingredientName;
+      const ingData = INGREDIENTS.find(i => i.name === ingredientName);
+      document.getElementById('modal-label').textContent = ingData && ingData.unit ? `Quantity (${ingData.unit})` : 'Quantity';
+      const input = document.getElementById('modal-qty-input');
+      input.value = 1;
+      input.classList.remove('error');
+      const errorEl = document.getElementById('modal-error');
+      errorEl.classList.remove('active');
+      errorEl.textContent = '';
+      document.getElementById('modal-overlay').classList.add('active');
+      setTimeout(() => { input.focus(); input.select(); }, 50);
     }
-    .meal-card:hover { border-color: #c8c5be; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-    .meal-card-name { font-size: 16px; font-weight: 500; }
-    .meal-card-meta { font-size: 12px; color: #999; margin-top: 2px; }
-... (787 lines left)
+
+    function adjustQty(delta) {
+      const input = document.getElementById('modal-qty-input');
+      const current = parseInt(input.value, 10);
+      const next = isNaN(current) ? 1 : Math.max(1, current + delta);
+      input.value = next;
+      input.classList.remove('error');
+      document.getElementById('modal-error').classList.remove('active');
+      document.getElementById('modal-error').textContent = '';
+    }
+
+    function closeModal() {
+      document.getElementById('modal-overlay').classList.remove('active');
+      pendingIngredient = null;
+    }
+
+    function submitModal() {
+      const input = document.getElementById('modal-qty-input');
+      const errorEl = document.getElementById('modal-error');
+      const raw = input.value.trim();
+
+      input.classList.remove('error');
+      errorEl.classList.remove('active');
+      errorEl.textContent = '';
+
+      if (raw === '') {
+        showModalError(input, errorEl, 'Please enter a quantity.');
+        return;
+      }
+      const num = Number(raw);
+      if (isNaN(num)) {
+        showModalError(input, errorEl, 'Please enter a valid number.');
+        return;
+      }
+      if (!Number.isInteger(num)) {
+        showModalError(input, errorEl, 'Decimals are not allowed. Enter a whole number.');
+        return;
+      }
+      if (num < 1) {
+        showModalError(input, errorEl, 'Quantity must be at least 1.');
+        return;
+      }
+
+      document.getElementById('gform-item').value = pendingIngredient;
+      document.getElementById('gform-qty').value = num;
+      document.getElementById('gform').submit();
+
+      showToast();
+      closeModal();
+      showMeals();
+    }
+
+    function showModalError(input, errorEl, message) {
+      input.classList.add('error');
+      errorEl.textContent = message;
+      errorEl.classList.add('active');
+      input.focus();
+    }
+
+    function renderMealList() {
+      const query = document.getElementById('search-input').value.trim().toLowerCase();
+      const container = document.getElementById('meal-list-container');
+      container.innerHTML = "";
+
+      if (query) {
+        renderSearchResults(container, query);
+        return;
+      }
+
+      renderByMeal(container);
+    }
+
+    function renderByMeal(container) {
+      const list = document.createElement('div');
+      list.className = 'meal-list';
+
+      MEALS.forEach(meal => {
+        const count = INGREDIENTS.filter(i => i.mealId === meal.id).length;
+        const card = document.createElement('div');
+
+        if (meal.ready) {
+          card.className = 'meal-card';
+          card.setAttribute('role', 'button');
+          card.setAttribute('tabindex', '0');
+          card.onclick = () => showIngredientsForMeal(meal.id);
+          card.onkeydown = (e) => { if (e.key === 'Enter') showIngredientsForMeal(meal.id); };
+          card.innerHTML = `
+            <div>
+              <div class="meal-card-name">${meal.name}</div>
+              <div class="meal-card-meta">${count} ingredient${count === 1 ? '' : 's'}</div>
+            </div>
+
+          `;
+        } else {
+          card.className = 'meal-card disabled';
+          card.setAttribute('aria-disabled', 'true');
+          card.innerHTML = `
+            <div>
+              <div class="meal-card-name">${meal.name}</div>
+              <div class="meal-card-meta">Work in progress</div>
+            </div>
+            <span class="badge badge-soon">WIP</span>
+          `;
+        }
+        list.appendChild(card);
+      });
+
+      container.appendChild(list);
+    }
+
+    function renderSearchResults(container, query) {
+      const matches = INGREDIENTS.filter(i =>
+        i.name.toLowerCase().includes(query) ||
+        i.mealName.toLowerCase().includes(query) ||
+        i.foodType.toLowerCase().includes(query)
+      );
+
+      if (matches.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No matching ingredients or meals.';
+        container.appendChild(empty);
+        return;
+      }
+
+      const list = document.createElement('div');
+      list.className = 'ingredient-list';
+      matches.forEach(ing => list.appendChild(makeIngredientRow(ing, true)));
+      container.appendChild(list);
+    }
+
+    function makeIngredientRow(ing, showMealTag) {
+      const row = document.createElement('div');
+      row.className = 'ingredient-item';
+      row.setAttribute('role', 'button');
+      row.setAttribute('tabindex', '0');
+      row.onclick = () => openModal(ing.name);
+      row.onkeydown = (e) => { if (e.key === 'Enter') openModal(ing.name); };
+
+      const tag = showMealTag
+        ? `<span class="badge badge-tag">${ing.mealName}</span>`
+        : '';
+
+      row.innerHTML = `
+        <div>
+          <div class="ingredient-name">${ing.name}</div>
+          <div class="ingredient-hint">Add to Intake · ${ing.unit}</div>
+        </div>
+        <div style="display:flex; align-items:center;">
+          ${tag}
+          <span class="search-icon">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 3H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-3"/>
+              <path d="M10 2h4v4"/>
+              <path d="M14 2L8 8"/>
+            </svg>
+          </span>
+        </div>
+      `;
+      return row;
+    }
+
+    function showIngredientsForMeal(mealId) {
+      const meal = MEALS.find(m => m.id === mealId);
+      const ingredients = INGREDIENTS.filter(i => i.mealId === mealId);
+
+      document.getElementById('ingredients-title').textContent = `${meal.name} — Ingredients`;
+      const listEl = document.getElementById('ingredients-list');
+      listEl.innerHTML = "";
+      ingredients.forEach(ing => listEl.appendChild(makeIngredientRow(ing, false)));
+
+      document.getElementById('page-meals').classList.remove('active');
+      document.getElementById('page-ingredients').classList.add('active');
+    }
+
+    function showMeals() {
+      document.getElementById('page-ingredients').classList.remove('active');
+      document.getElementById('page-meals').classList.add('active');
+      renderMealList();
+    }
+
+    function showToast() {
+      const t = document.getElementById('toast');
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 1800);
+    }
+
+    // Close modal on backdrop click
+    document.getElementById('modal-overlay').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+
+    // Keyboard shortcuts inside modal
+    document.getElementById('modal-qty-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') submitModal();
+      if (e.key === 'Escape') closeModal();
+    });
+
+    renderMealList();
+  </script>
+
+
+  <div class="toast" id="toast">✓ Complete</div>
+</body>
+</html>
