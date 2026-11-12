@@ -1,1 +1,2106 @@
+JavaScript Code:
+SignUpGenius>Zapier>Airtable Automation 
+STEPS 3, 7, 12, 13, 14, & 17
+
+
+Step 3: Uses JavaScript to identify volunteer-related events from SignUpGenius and exclude unrelated events.
+
+export default async function main({ inputData }) {
+  // ==========================================
+  // SIGNUPGENIUS EVENT FILTER — OPTIMIZED
+  // ==========================================
+
+  const key = String(inputData.user_key ?? "").trim();
+
+  if (!key) {
+    throw new Error("Missing SignUpGenius API key.");
+  }
+
+  // Keep recently ended events for late registrations.
+  const GRACE_PERIOD_DAYS = 30;
+
+  const cutoff =
+    Date.now() - GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+
+  // ==========================================
+  // FETCH SIGNUPGENIUS EVENTS
+  // ==========================================
+
+  const url =
+    "https://api.signupgenius.com/v2/k/signups/created/all/" +
+    "?user_key=" + encodeURIComponent(key);
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      "SignUpGenius request failed: HTTP " +
+      response.status
+    );
+  }
+
+  const result = await response.json();
+
+  if (
+    result.success !== true ||
+    !Array.isArray(result.data)
+  ) {
+    throw new Error(
+      "SignUpGenius returned an unexpected response."
+    );
+  }
+
+  // ==========================================
+  // PARSE EVENT END DATE
+  // ==========================================
+
+  function getEndTimestamp(event) {
+    const numeric = Number(event.enddate);
+
+    if (Number.isFinite(numeric) && numeric > 0) {
+      // Support both Unix seconds and milliseconds.
+      const milliseconds =
+        numeric < 100000000000
+          ? numeric * 1000
+          : numeric;
+
+      const date = new Date(milliseconds);
+
+      if (!Number.isNaN(date.getTime())) {
+        return date.getTime();
+      }
+    }
+
+    // Fall back to an end-date string if present.
+    if (event.enddatestring) {
+      const parsed = Date.parse(
+        String(event.enddatestring)
+      );
+
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    // Unknown end dates are retained, not discarded.
+    return null;
+  }
+
+  // ==========================================
+  // FILTER VOLUNTEER EVENTS
+  // ==========================================
+
+  const events = result.data;
+  const filtered = [];
+  const seenIds = new Set();
+
+  let excludedNonVolunteer = 0;
+  let excludedExpired = 0;
+  let missingEndDate = 0;
+
+  for (const event of events) {
+    const id = String(
+      event.signupid ?? ""
+    ).trim();
+
+    const title = String(
+      event.title ?? ""
+    ).trim();
+
+    const lower = title.toLowerCase();
+
+    const isVolunteer =
+      lower.includes("volunteer") ||
+      lower === "wegmans food rescue" ||
+      lower === "whole foods tysons";
+
+    if (!id || !isVolunteer) {
+      excludedNonVolunteer++;
+      continue;
+    }
+
+    const endTimestamp = getEndTimestamp(event);
+
+    if (endTimestamp === null) {
+      missingEndDate++;
+    } else if (endTimestamp < cutoff) {
+      excludedExpired++;
+      continue;
+    }
+
+    if (seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+
+    filtered.push({
+      signup_id: id,
+      event_name: title
+    });
+  }
+
+  // ==========================================
+  // RETURN FILTERED EVENTS
+  // ==========================================
+
+  return {
+    status: "event_filter_complete",
+
+    original_count: events.length,
+
+    filtered_count: filtered.length,
+
+    excluded_count:
+      events.length - filtered.length,
+
+    excluded_non_volunteer_count:
+      excludedNonVolunteer,
+
+    excluded_expired_count:
+      excludedExpired,
+
+    missing_end_date_count:
+      missingEndDate,
+
+    grace_period_days:
+      GRACE_PERIOD_DAYS,
+
+    signup_ids: filtered.map(
+      event => event.signup_id
+    ),
+
+    event_titles: filtered.map(
+      event => event.event_name
+    ),
+
+    preview_json: JSON.stringify(
+      filtered.slice(0, 5)
+    )
+  };
+}
+
+
+
+Step 7: Process Registrations: Retrieves and organizes volunteer information, including names, emails, phone numbers, event dates, and registration IDs.
+
+
+const raw = inputData.registrations;
+const response = typeof raw === "string"
+  ? JSON.parse(raw)
+  : raw;
+
+const signupsRaw = response.data?.signup || [];
+const signups = Array.isArray(signupsRaw)
+  ? signupsRaw
+  : [signupsRaw];
+
+const eventName = String(inputData.eventname || "").trim();
+const eventId = String(inputData.signupid || "").trim();
+
+// Only include registrations created October 1, 2026 or later
+const cutoff = Date.parse("2026-10-01T00:00:00-04:00");
+
+// Maximum records in each prepared batch
+const BATCH_SIZE = 10;
+
+// Convert SignUpGenius creation dates into timestamps
+function parseCreatedDate(value) {
+  if (!value) return NaN;
+
+  const formatted = String(value).trim().replace(
+    /^(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}:\d{2})(?::(\d{2}))?$/,
+    (_, year, month, day, time, seconds) =>
+      `${year}-${month}-${day}T${time}:${seconds || "00"}-04:00`
+  );
+
+  return Date.parse(formatted);
+}
+
+// Check whether the current event is a volunteer event
+const isVolunteerEvent =
+  /volunteer/i.test(eventName) ||
+  /wegmans food rescue/i.test(eventName) ||
+  /whole foods tysons/i.test(eventName);
+
+// Check that API registrations belong to the current event
+const mismatchedSignups = signups.filter(s =>
+  s.signupid &&
+  String(s.signupid).trim() !== eventId
+);
+
+const eventMatches =
+  eventId !== "" &&
+  mismatchedSignups.length === 0;
+
+// Only prepare records when the event is valid
+const safeToProcess = isVolunteerEvent && eventMatches;
+
+// Process registrations
+const records = safeToProcess
+  ? signups
+      .filter(s => {
+        if (!s.email || !s.itemmemberid) return false;
+
+        const created = parseCreatedDate(s.datecreated);
+
+        return Number.isFinite(created) && created >= cutoff;
+      })
+      .map(s => {
+        const firstName = String(s.firstname || "").trim();
+        const lastName = String(s.lastname || "").trim();
+        const start = Number(s.startdate);
+
+        return {
+          name: `${firstName} ${lastName}`.trim(),
+          email: String(s.email).trim().toLowerCase(),
+
+          // Phone number from SignUpGenius
+          phone: String(s.phone || "").trim(),
+
+          event_name: eventName,
+          event_date: start > 0
+            ? new Date(start * 1000).toISOString()
+            : "",
+          role: String(s.item || ""),
+          registration_id: String(s.itemmemberid),
+          signup_id: eventId,
+          date_created: String(s.datecreated || "")
+        };
+      })
+  : [];
+
+// Remove repeated registration IDs in the API response
+const seen = new Set();
+
+const uniqueRecords = records.filter(r => {
+  if (seen.has(r.registration_id)) return false;
+  seen.add(r.registration_id);
+  return true;
+});
+
+// Divide registrations into batches of up to 10
+const batches = [];
+
+for (let i = 0; i < uniqueRecords.length; i += BATCH_SIZE) {
+  batches.push(uniqueRecords.slice(i, i + BATCH_SIZE));
+}
+
+// Serialize each batch for later API processing
+const batchPayloads = batches.map(batch =>
+  JSON.stringify(batch)
+);
+
+// Explain whether this sample is ready
+let status = "ready";
+
+if (!isVolunteerEvent) {
+  status = "excluded_non_volunteer_event";
+} else if (!eventMatches) {
+  status = "signup_id_mismatch";
+} else if (uniqueRecords.length === 0) {
+  status = "no_qualifying_registrations";
+}
+
+// Return original data plus prepared batches
+return {
+  status: status,
+  safe_to_process: safeToProcess,
+  event_name: eventName,
+  event_id: eventId,
+
+  record_count: uniqueRecords.length,
+  batch_count: batches.length,
+  batch_size: BATCH_SIZE,
+
+  registration_ids: uniqueRecords.map(r => r.registration_id),
+  signup_ids: uniqueRecords.map(r => r.signup_id),
+  emails: uniqueRecords.map(r => r.email),
+  names: uniqueRecords.map(r => r.name),
+
+  // Phone numbers for downstream steps
+  phones: uniqueRecords.map(r => r.phone),
+
+  event_names: uniqueRecords.map(r => r.event_name),
+  event_dates: uniqueRecords.map(r => r.event_date),
+  roles: uniqueRecords.map(r => r.role),
+  dates_created: uniqueRecords.map(r => r.date_created),
+
+  batch_payloads: batchPayloads,
+  all_records_json: JSON.stringify(uniqueRecords)
+};
+
+
+Step 12: Check Existing Records: Processes registration data to help identify volunteers who already exist in Airtable and prevent duplicates.
+
+
+import { createZapierSdk } from "@zapier/zapier-sdk";
+
+const zapier = createZapierSdk();
+
+export default async function main({ inputData }) {
+  const BASE_ID = "appSqAtWwMk5Zbjcn";
+  const CONNECTION_ID = 66734641;
+
+  // Retrieve all pages from Airtable
+  async function fetchAllRecords(table) {
+    const records = [];
+    const seenIds = new Set();
+    const seenOffsets = new Set();
+    let offset = null;
+
+    for (let page = 0; page < 20; page++) {
+      const params = new URLSearchParams();
+      params.set("pageSize", "100");
+
+      if (offset) params.set("offset", offset);
+
+      const url =
+        `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(table)}?${params.toString()}`;
+
+      const response = await zapier.fetch(url, {
+        method: "GET",
+        connection: CONNECTION_ID
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `${table} request failed: HTTP ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+
+      if (!Array.isArray(data.records)) {
+        throw new Error(`Invalid response from ${table}`);
+      }
+
+      let added = 0;
+
+      for (const record of data.records) {
+        if (!seenIds.has(record.id)) {
+          seenIds.add(record.id);
+          records.push(record);
+          added++;
+        }
+      }
+
+      if (data.records.length > 0 && added === 0) {
+        throw new Error(`Repeated page in ${table}`);
+      }
+
+      if (!data.offset) return records;
+
+      if (seenOffsets.has(data.offset)) {
+        throw new Error(`Repeated offset in ${table}`);
+      }
+
+      seenOffsets.add(data.offset);
+      offset = data.offset;
+    }
+
+    throw new Error(`Pagination incomplete for ${table}`);
+  }
+
+  const raw = inputData.new_registrations;
+
+  const incoming =
+    typeof raw === "string" ? JSON.parse(raw) : raw;
+
+  if (!Array.isArray(incoming)) {
+    throw new Error("Incoming registrations must be an array");
+  }
+
+  const volunteers = await fetchAllRecords("Volunteers");
+  const people = await fetchAllRecords("People");
+
+  const norm = value =>
+    String(value ?? "").trim().toLowerCase();
+
+  const field = (record, name) =>
+    record.fields?.[name] ?? "";
+
+  const dateOnly = value => {
+    const match = String(value ?? "")
+      .match(/^\d{4}-\d{2}-\d{2}/);
+
+    return match ? match[0] : "";
+  };
+
+  function datesClose(a, b) {
+    const first = dateOnly(a);
+    const second = dateOnly(b);
+
+    if (!first || !second) return false;
+
+    const difference = Math.abs(
+      Date.parse(`${first}T00:00:00Z`) -
+      Date.parse(`${second}T00:00:00Z`)
+    );
+
+    return difference <= 86400000;
+  }
+
+  // Index People by Airtable record ID
+  const peopleById = new Map(
+    people.map(person => [person.id, person])
+  );
+
+  // Index People by email
+  const peopleByEmail = new Map();
+
+  for (const person of people) {
+    const email = norm(field(person, "Email"));
+
+    if (!email) continue;
+
+    if (!peopleByEmail.has(email)) {
+      peopleByEmail.set(email, []);
+    }
+
+    peopleByEmail.get(email).push(person.id);
+  }
+
+  // Resolve emails from the linked Person records
+  function getVolunteerEmails(volunteer) {
+    const emails = new Set();
+
+    const directEmail = norm(
+      field(volunteer, "Person Email")
+    );
+
+    if (directEmail) emails.add(directEmail);
+
+    const linkedIds = field(volunteer, "Person");
+
+    if (Array.isArray(linkedIds)) {
+      for (const id of linkedIds) {
+        const person = peopleById.get(id);
+
+        if (person) {
+          const email = norm(field(person, "Email"));
+          if (email) emails.add(email);
+        }
+      }
+    }
+
+    return [...emails];
+  }
+
+  const exact = [];
+  const strongCandidates = [];
+  const reviewNeeded = [];
+  const unmatched = [];
+
+  for (const item of incoming) {
+    const registrationId = norm(item.registration_id);
+    const signupId = norm(item.signup_id);
+    const email = norm(item.email);
+    const eventName = norm(item.event_name);
+    const role = norm(item.role);
+
+    if (!registrationId || !signupId || !email) {
+      throw new Error(
+        "Incoming registration has missing identifiers"
+      );
+    }
+
+    // Match by unique SignUpGenius Registration ID
+    const exactMatches = volunteers.filter(record =>
+      norm(field(record, "Registration ID")) ===
+      registrationId
+    );
+
+    if (exactMatches.length) {
+      exact.push({
+        registration_id: registrationId,
+        airtable_ids: exactMatches.map(r => r.id)
+      });
+      continue;
+    }
+
+    // Compare email, event, date and role
+    const candidates = volunteers.map(record => {
+      const emails = getVolunteerEmails(record);
+
+      const oldSignupId = norm(
+        field(record, "Signup ID")
+      );
+
+      const oldEventName = norm(
+        field(record, "Event Name")
+      );
+
+      const oldRole = norm(
+        field(record, "Role / Slot")
+      );
+
+      return {
+        id: record.id,
+        emailMatches: emails.includes(email),
+        eventMatches:
+          (oldSignupId !== "" && oldSignupId === signupId) ||
+          (oldEventName !== "" && oldEventName === eventName),
+        dateMatches: datesClose(
+          item.event_date,
+          field(record, "Volunteer Date")
+        ),
+        roleMatches: role !== "" && oldRole === role,
+        hasEmail: emails.length > 0
+      };
+    }).filter(candidate =>
+      candidate.eventMatches &&
+      candidate.dateMatches
+    );
+
+    const strong = candidates.filter(candidate =>
+      candidate.emailMatches &&
+      candidate.roleMatches
+    );
+
+    if (strong.length) {
+      strongCandidates.push({
+        registration_id: registrationId,
+        candidate_ids: strong.map(c => c.id)
+      });
+      continue;
+    }
+
+    const differentRole = candidates.filter(candidate =>
+      candidate.emailMatches &&
+      !candidate.roleMatches
+    );
+
+    if (differentRole.length) {
+      reviewNeeded.push({
+        registration_id: registrationId,
+        reason: "different_or_missing_role",
+        candidate_ids: differentRole.map(c => c.id)
+      });
+      continue;
+    }
+
+    const missingEmail = candidates.filter(candidate =>
+      !candidate.hasEmail &&
+      candidate.roleMatches
+    );
+
+    if (missingEmail.length) {
+      reviewNeeded.push({
+        registration_id: registrationId,
+        reason: "missing_existing_email",
+        candidate_ids: missingEmail.map(c => c.id)
+      });
+      continue;
+    }
+
+    unmatched.push({
+      registration_id: registrationId,
+      email: email,
+      matching_people_ids:
+        peopleByEmail.get(email) || []
+    });
+  }
+
+  // Separate unmatched registrations by People matches
+  const unmatchedWithExistingPeople = unmatched.filter(
+    record => record.matching_people_ids.length > 0
+  );
+
+  const unmatchedWithoutExistingPeople = unmatched.filter(
+    record => record.matching_people_ids.length === 0
+  );
+
+  // Count distinct emails, not just registrations
+  const uniqueNewPeopleEmails = new Set(
+    unmatchedWithoutExistingPeople
+      .map(record => record.email)
+      .filter(Boolean)
+  );
+
+  // Read-only results
+  return {
+    status: "comparison_report_complete",
+
+    volunteer_records_checked: volunteers.length,
+    people_records_checked: people.length,
+    incoming_count: incoming.length,
+
+    exact_match_count: exact.length,
+    strong_candidate_count: strongCandidates.length,
+    review_needed_count: reviewNeeded.length,
+    unmatched_count: unmatched.length,
+
+    unmatched_with_existing_people:
+      unmatchedWithExistingPeople.length,
+
+    unmatched_without_existing_people:
+      unmatchedWithoutExistingPeople.length,
+
+    unique_new_people_emails:
+      uniqueNewPeopleEmails.size,
+
+    exact_matches_json: JSON.stringify(exact),
+
+    strong_candidates_json:
+      JSON.stringify(strongCandidates),
+
+    review_needed_json:
+      JSON.stringify(reviewNeeded),
+
+    unmatched_json: JSON.stringify(unmatched),
+
+    unmatched_existing_people_json:
+      JSON.stringify(unmatchedWithExistingPeople),
+
+    unmatched_new_people_json:
+      JSON.stringify(unmatchedWithoutExistingPeople),
+
+    safe_to_import: false
+  };
+}
+
+
+Step 13: Match Volunteers: Organizes matching information to determine which volunteers can be linked to existing People records and which may need new records.
+
+function parseArray(value, label) {
+  const parsed = typeof value === "string"
+    ? JSON.parse(value)
+    : value;
+
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON array`);
+  }
+
+  return parsed;
+}
+
+const unmatched = parseArray(
+  inputData.unmatched_json,
+  "Unmatched registrations"
+);
+
+const existingPeople = parseArray(
+  inputData.existing_people_json,
+  "Existing People"
+);
+
+const newPeople = parseArray(
+  inputData.new_people_json,
+  "New People"
+);
+
+const normalize = value =>
+  String(value ?? "").trim().toLowerCase();
+
+const seenRegistrationIds = new Set();
+const duplicateIds = [];
+const invalidRecords = [];
+
+for (const record of unmatched) {
+  const id = normalize(record.registration_id);
+
+  if (!id) {
+    invalidRecords.push(record);
+    continue;
+  }
+
+  if (seenRegistrationIds.has(id)) {
+    duplicateIds.push(id);
+  }
+
+  seenRegistrationIds.add(id);
+}
+
+const existingById = new Map(
+  existingPeople.map(record => [
+    normalize(record.registration_id),
+    record
+  ])
+);
+
+const newById = new Map(
+  newPeople.map(record => [
+    normalize(record.registration_id),
+    record
+  ])
+);
+
+const matchedExisting = [];
+const needsNewPerson = [];
+const ambiguousPeople = [];
+const unclassified = [];
+
+for (const record of unmatched) {
+  const id = normalize(record.registration_id);
+
+  if (!id) continue;
+
+  const existing = existingById.get(id);
+  const newRecord = newById.get(id);
+
+  if (existing && newRecord) {
+    unclassified.push({
+      registration_id: id,
+      reason: "appears_in_both_groups"
+    });
+    continue;
+  }
+
+  if (existing) {
+    const peopleIds = existing.matching_people_ids || [];
+
+    if (peopleIds.length === 1) {
+      matchedExisting.push({
+        registration_id: id,
+        person_id: peopleIds[0]
+      });
+    } else {
+      ambiguousPeople.push({
+        registration_id: id,
+        people_ids: peopleIds
+      });
+    }
+
+    continue;
+  }
+
+  if (newRecord) {
+    needsNewPerson.push({
+      registration_id: id,
+      email: normalize(newRecord.email || record.email)
+    });
+    continue;
+  }
+
+  unclassified.push({
+    registration_id: id,
+    reason: "missing_from_people_groups"
+  });
+}
+
+const uniqueNewEmails = [
+  ...new Set(
+    needsNewPerson
+      .map(record => record.email)
+      .filter(Boolean)
+  )
+];
+
+return {
+  status: "import_plan_prepared_read_only",
+  total_unmatched: unmatched.length,
+  existing_people_links_ready: matchedExisting.length,
+  registrations_needing_new_people: needsNewPerson.length,
+  unique_new_people_emails: uniqueNewEmails.length,
+  ambiguous_people_count: ambiguousPeople.length,
+  duplicate_registration_ids_count: duplicateIds.length,
+  invalid_records_count: invalidRecords.length,
+  unclassified_count: unclassified.length,
+  existing_people_links_json: JSON.stringify(matchedExisting),
+  new_people_emails_json: JSON.stringify(uniqueNewEmails),
+  needs_new_person_json: JSON.stringify(needsNewPerson),
+  ambiguous_people_json: JSON.stringify(ambiguousPeople),
+  duplicate_ids_json: JSON.stringify(duplicateIds),
+  unclassified_json: JSON.stringify(unclassified),
+  safe_to_import: false
+};
+
+
+Step 14: Prepare Records: Validates and organizes volunteer information into batches before sending it to Airtable.
+
+function parseArray(value, label) {
+  const parsed = typeof value === "string"
+    ? JSON.parse(value)
+    : value;
+
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON array`);
+  }
+
+  return parsed;
+}
+
+const normalize = value =>
+  String(value ?? "").trim().toLowerCase();
+
+const allRegistrations = parseArray(
+  inputData.all_registrations,
+  "All registrations"
+);
+
+const unmatched = parseArray(
+  inputData.unmatched_json,
+  "Unmatched registrations"
+);
+
+const existingLinks = parseArray(
+  inputData.existing_people_links,
+  "Existing People links"
+);
+
+const needsNewPerson = parseArray(
+  inputData.needs_new_person,
+  "Registrations needing new People"
+);
+
+// Index complete registration data by Registration ID
+const registrationsById = new Map();
+
+for (const record of allRegistrations) {
+  const id = normalize(record.registration_id);
+
+  if (!id) continue;
+
+  if (registrationsById.has(id)) {
+    throw new Error(
+      `Duplicate Registration ID in source: ${id}`
+    );
+  }
+
+  registrationsById.set(id, record);
+}
+
+// Index existing People links
+const peopleLinksById = new Map();
+
+for (const link of existingLinks) {
+  const id = normalize(link.registration_id);
+
+  if (!id || !link.person_id) {
+    throw new Error("Invalid existing People link");
+  }
+
+  peopleLinksById.set(id, link.person_id);
+}
+
+// Index registrations requiring a new Person
+const newPeopleIds = new Set(
+  needsNewPerson.map(record =>
+    normalize(record.registration_id)
+  )
+);
+
+const preparedRecords = [];
+const missingDetails = [];
+const unresolvedPeople = [];
+const seen = new Set();
+
+for (const item of unmatched) {
+  const registrationId = normalize(item.registration_id);
+
+  if (!registrationId || seen.has(registrationId)) {
+    throw new Error(
+      "Missing or repeated Registration ID in unmatched list"
+    );
+  }
+
+  seen.add(registrationId);
+
+  const source = registrationsById.get(registrationId);
+
+  if (!source) {
+    missingDetails.push({
+      registration_id: registrationId,
+      reason: "source_registration_not_found"
+    });
+    continue;
+  }
+
+  const email = normalize(source.email);
+  const phone = String(source.phone || "").trim();
+  const signupId = String(source.signup_id || "").trim();
+  const eventName = String(source.event_name || "").trim();
+  const eventDate = String(source.event_date || "").trim();
+  const role = String(source.role || "").trim();
+  const name = String(source.name || "").trim();
+
+  if (
+    !email ||
+    !signupId ||
+    !eventName ||
+    !eventDate ||
+    !registrationId ||
+    !Number.isFinite(Date.parse(eventDate))
+  ) {
+    missingDetails.push({
+      registration_id: registrationId,
+      reason: "missing_or_invalid_required_fields"
+    });
+    continue;
+  }
+
+  const existingPersonId = peopleLinksById.get(registrationId);
+  const requiresNewPerson = newPeopleIds.has(registrationId);
+
+  if (
+    (existingPersonId && requiresNewPerson) ||
+    (!existingPersonId && !requiresNewPerson)
+  ) {
+    unresolvedPeople.push({
+      registration_id: registrationId,
+      reason: "missing_or_conflicting_people_assignment"
+    });
+    continue;
+  }
+
+  preparedRecords.push({
+    registration_id: registrationId,
+    signup_id: signupId,
+    name: name,
+    email: email,
+    phone: phone,
+    event_name: eventName,
+    event_date: eventDate,
+    role: role,
+    date_created: String(source.date_created || ""),
+    person_id: existingPersonId || "",
+    person_action: existingPersonId
+      ? "link_existing"
+      : "find_or_create_by_email",
+    source: "SignUpGenius",
+    status: "pending_review"
+  });
+}
+
+// Organize records into groups of up to 10
+const BATCH_SIZE = 10;
+const batches = [];
+
+for (let i = 0; i < preparedRecords.length; i += BATCH_SIZE) {
+  batches.push(
+    preparedRecords.slice(i, i + BATCH_SIZE)
+  );
+}
+
+const existingCount = preparedRecords.filter(
+  record => record.person_action === "link_existing"
+).length;
+
+const newPersonCount = preparedRecords.filter(
+  record => record.person_action === "find_or_create_by_email"
+).length;
+
+const uniqueNewEmails = [
+  ...new Set(
+    preparedRecords
+      .filter(r => r.person_action === "find_or_create_by_email")
+      .map(r => r.email)
+  )
+];
+
+const complete =
+  missingDetails.length === 0 &&
+  unresolvedPeople.length === 0 &&
+  preparedRecords.length === unmatched.length;
+
+return {
+  status: complete
+    ? "import_preview_ready"
+    : "import_preview_needs_review",
+
+  total_source_registrations: allRegistrations.length,
+  unmatched_registrations: unmatched.length,
+
+  prepared_records_count: preparedRecords.length,
+  existing_people_links_count: existingCount,
+  needs_new_people_registrations: newPersonCount,
+  unique_new_people_emails: uniqueNewEmails.length,
+
+  missing_details_count: missingDetails.length,
+  unresolved_people_count: unresolvedPeople.length,
+
+  batch_size: BATCH_SIZE,
+  batch_count: batches.length,
+
+  prepared_records_json: JSON.stringify(preparedRecords),
+  batches_json: JSON.stringify(batches),
+  unique_new_emails_json: JSON.stringify(uniqueNewEmails),
+  missing_details_json: JSON.stringify(missingDetails),
+  unresolved_people_json: JSON.stringify(unresolvedPeople),
+
+  // No write operations are performed.
+  safe_to_import: false
+};
+
+
+Step 17: Import and Update Airtable: Automatically imports volunteer registrations, links People records, fills missing phone numbers, and checks the Volunteer? checkbox.
+
+
+import { createZapierSdk } from "@zapier/zapier-sdk";
+
+const zapier = createZapierSdk();
+
+export default async function main({ inputData }) {
+
+  // =====================================
+  // CONFIGURATION
+  // =====================================
+
+  const BASE_ID = "appSqAtWwMk5Zbjcn";
+  const CONNECTION_ID = 66734641;
+
+  // SAFE TEST: no Airtable writes
+  const MODE = "AUTO";
+  const ENABLE_WRITES = true;
+  const OLD_ZAPS_DISABLED = true;
+  const OVERLAPPING_RUNS_PREVENTED = true;
+
+  const MAX_NEW_VOLUNTEERS_PER_RUN = 1;
+
+  const PHONE_FIELD = "Phone";
+  const VOLUNTEER_FIELD = "Volunteer?";
+
+  // =====================================
+  // SAFETY CHECKS
+  // =====================================
+
+  if (!["PREVIEW", "AUTO"].includes(MODE)) {
+    throw new Error("Invalid mode");
+  }
+
+  if (MODE === "PREVIEW" && ENABLE_WRITES) {
+    throw new Error(
+      "PREVIEW mode cannot perform writes."
+    );
+  }
+
+  if (
+    MODE === "AUTO" &&
+    (
+      !ENABLE_WRITES ||
+      !OLD_ZAPS_DISABLED ||
+      !OVERLAPPING_RUNS_PREVENTED
+    )
+  ) {
+    throw new Error(
+      "AUTO mode requires write approval, " +
+      "older Zaps disabled, and overlapping " +
+      "executions prevented."
+    );
+  }
+
+  const norm = value =>
+    String(value ?? "").trim().toLowerCase();
+
+  const str = value =>
+    String(value ?? "").trim();
+
+  const field = (record, name) =>
+    record.fields?.[name] ?? "";
+
+  const day = value =>
+    str(value).slice(0, 10);
+
+  const midnight = value =>
+    /T00:00:00(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)?$/i
+      .test(str(value));
+
+  function parseArray(value) {
+    const result =
+      typeof value === "string"
+        ? JSON.parse(value)
+        : value;
+
+    if (!Array.isArray(result)) {
+      throw new Error(
+        "Prepared records must be an array."
+      );
+    }
+
+    return result;
+  }
+
+  // =====================================
+  // VALIDATE STEP 14 INPUTS
+  // =====================================
+
+  if (
+    inputData.preview_status !==
+    "import_preview_ready"
+  ) {
+    throw new Error(
+      "Step 14 import preview is not ready."
+    );
+  }
+
+  const prepared = parseArray(
+    inputData.prepared_records
+  );
+
+  // =====================================
+  // AIRTABLE API REQUESTS
+  // =====================================
+
+  async function request(
+    method,
+    table,
+    payload = null,
+    query = null,
+    recordId = null
+  ) {
+    const base =
+      `https://api.airtable.com/v0/${BASE_ID}/` +
+      encodeURIComponent(table) +
+      (recordId ? "/" + encodeURIComponent(recordId) : "");
+
+    const parameters = new URLSearchParams();
+
+    if (query) {
+      for (const [key, value] of
+        Object.entries(query)) {
+        parameters.set(key, String(value));
+      }
+    }
+
+    const suffix = parameters.toString();
+
+    const url =
+      base + (suffix ? `?${suffix}` : "");
+
+    const options = {
+      method,
+      connection: CONNECTION_ID
+    };
+
+    if (payload !== null) {
+      options.headers = {
+        "Content-Type": "application/json"
+      };
+
+      options.body = JSON.stringify(payload);
+    }
+
+    const response = await zapier.fetch(
+      url,
+      options
+    );
+
+    if (!response.ok) {
+      const detail =
+        (await response.text()).slice(0, 500);
+
+      throw new Error(
+        `${table} ${method} failed: ` +
+        `${response.status} ${detail}`
+      );
+    }
+
+    return response.json();
+  }
+
+  // =====================================
+  // FETCH ALL AIRTABLE RECORDS
+  // =====================================
+
+  async function getAllRecords(table) {
+    const records = [];
+    const seenIds = new Set();
+    const seenOffsets = new Set();
+
+    let offset = "";
+
+    for (let page = 0; page < 40; page++) {
+      const query = {
+        pageSize: "100"
+      };
+
+      if (offset) {
+        query.offset = offset;
+      }
+
+      const result = await request(
+        "GET",
+        table,
+        null,
+        query
+      );
+
+      if (!Array.isArray(result.records)) {
+        throw new Error(
+          `Invalid response from ${table}`
+        );
+      }
+
+      let added = 0;
+
+      for (const record of result.records) {
+        if (!record.id) {
+          throw new Error(
+            `${table} record missing ID`
+          );
+        }
+
+        if (seenIds.has(record.id)) {
+          continue;
+        }
+
+        seenIds.add(record.id);
+        records.push(record);
+        added++;
+      }
+
+      if (
+        result.records.length > 0 &&
+        added === 0
+      ) {
+        throw new Error(
+          `Repeated records detected in ${table}`
+        );
+      }
+
+      if (!result.offset) {
+        return records;
+      }
+
+      if (seenOffsets.has(result.offset)) {
+        throw new Error(
+          `Repeated pagination offset in ${table}`
+        );
+      }
+
+      seenOffsets.add(result.offset);
+      offset = result.offset;
+    }
+
+    throw new Error(
+      `Incomplete pagination for ${table}`
+    );
+  }
+
+  // =====================================
+  // FRESH AIRTABLE SEARCH
+  // =====================================
+
+  function formulaString(value) {
+    return '"' +
+      str(value)
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\r/g, "\\r")
+        .replace(/\n/g, "\\n") +
+      '"';
+  }
+
+  async function findFreshRecords(
+    table,
+    fieldName,
+    value
+  ) {
+    const formula =
+      `{${fieldName}} = ${formulaString(value)}`;
+
+    const result = await request(
+      "GET",
+      table,
+      null,
+      {
+        filterByFormula: formula,
+        pageSize: "100"
+      }
+    );
+
+    if (!Array.isArray(result.records)) {
+      throw new Error(
+        `Invalid fresh lookup for ${table}`
+      );
+    }
+
+    if (result.offset) {
+      throw new Error(
+        `Fresh lookup returned too many ` +
+        `matches in ${table}; manual review required.`
+      );
+    }
+
+    return result.records;
+  }
+
+  async function freshRegistrationLookup(id) {
+    return findFreshRecords(
+      "Volunteers",
+      "Registration ID",
+      id
+    );
+  }
+
+  async function freshPeopleLookup(email) {
+    const formula =
+      `LOWER(TRIM({Email} & "")) = ` +
+      formulaString(norm(email));
+
+    const result = await request(
+      "GET",
+      "People",
+      null,
+      {
+        filterByFormula: formula,
+        pageSize: "100"
+      }
+    );
+
+    if (!Array.isArray(result.records)) {
+      throw new Error(
+        "Invalid People lookup response."
+      );
+    }
+
+    if (result.offset) {
+      throw new Error(
+        "Too many matching People records."
+      );
+    }
+
+    return result.records;
+  }
+
+  // =====================================
+  // LOAD PEOPLE AND VOLUNTEERS
+  // =====================================
+
+  const people = await getAllRecords(
+    "People"
+  );
+
+  const volunteers = await getAllRecords(
+    "Volunteers"
+  );
+
+  const byPersonId = new Map(
+    people.map(person => [
+      person.id,
+      person
+    ])
+  );
+
+  const byEmail = new Map();
+
+  function indexPerson(person) {
+    const email = norm(
+      field(person, "Email")
+    );
+
+    if (!email) return;
+
+    if (!byEmail.has(email)) {
+      byEmail.set(email, []);
+    }
+
+    const matches = byEmail.get(email);
+
+    const index = matches.findIndex(
+      p => p.id === person.id
+    );
+
+    if (index >= 0) {
+      matches[index] = person;
+    } else {
+      matches.push(person);
+    }
+
+    byPersonId.set(person.id, person);
+  }
+
+  for (const person of people) {
+    indexPerson(person);
+  }
+
+  // =====================================
+  // VOLUNTEER EMAIL LOOKUP
+  // =====================================
+
+  function emailsForVolunteer(volunteer) {
+    const emails = new Set();
+
+    const direct = norm(
+      field(volunteer, "Person Email")
+    );
+
+    if (direct) {
+      emails.add(direct);
+    }
+
+    const linked = field(
+      volunteer,
+      "Person"
+    );
+
+    if (Array.isArray(linked)) {
+      for (const id of linked) {
+        const person = byPersonId.get(id);
+
+        if (person) {
+          const email = norm(
+            field(person, "Email")
+          );
+
+          if (email) {
+            emails.add(email);
+          }
+        }
+      }
+    }
+
+    return emails;
+  }
+
+  // =====================================
+  // REGISTRATION CLASSIFICATION
+  // =====================================
+
+  function classify(source) {
+    const registration = {
+      registration_id:
+        str(source.registration_id),
+
+      signup_id:
+        str(source.signup_id),
+
+      name:
+        str(source.name),
+
+      email:
+        norm(source.email),
+
+      phone:
+        str(source.phone),
+
+      event_name:
+        str(source.event_name),
+
+      event_date:
+        str(source.event_date),
+
+      role:
+        str(source.role)
+    };
+
+    const r = registration;
+
+    const required = [
+      r.registration_id,
+      r.signup_id,
+      r.name,
+      r.email,
+      r.event_name,
+      r.event_date,
+      r.role
+    ];
+
+    if (
+      required.some(value => !value) ||
+      !/^\d{4}-\d{2}-\d{2}T/.test(r.event_date) ||
+      !Number.isFinite(
+        Date.parse(r.event_date)
+      )
+    ) {
+      return {
+        ...r,
+        status: "review_invalid"
+      };
+    }
+
+    // Check existing Registration ID.
+    const exact = volunteers.some(
+      volunteer =>
+        str(
+          field(volunteer, "Registration ID")
+        ) === r.registration_id
+    );
+
+    if (exact) {
+      return {
+        ...r,
+        status: "already_imported"
+      };
+    }
+
+    const matchingPeople =
+      byEmail.get(r.email) || [];
+
+    if (matchingPeople.length > 1) {
+      return {
+        ...r,
+        status: "review_multiple_people"
+      };
+    }
+
+    // =====================================
+    // HISTORICAL DUPLICATE CHECK
+    // =====================================
+
+    const historicalRisk = volunteers.some(
+      volunteer => {
+
+        if (
+          !emailsForVolunteer(volunteer)
+            .has(r.email)
+        ) {
+          return false;
+        }
+
+        const eventMatches =
+          norm(field(volunteer, "Event Name")) ===
+          norm(r.event_name);
+
+        const signupMatches =
+          str(field(volunteer, "Signup ID")) ===
+          r.signup_id;
+
+        if (
+          !eventMatches &&
+          !signupMatches
+        ) {
+          return false;
+        }
+
+        const existingRole = norm(
+          field(volunteer, "Role / Slot")
+        );
+
+        if (
+          existingRole &&
+          existingRole !== norm(r.role)
+        ) {
+          return false;
+        }
+
+        const existingDate = str(
+          field(volunteer, "Volunteer Date")
+        );
+
+        if (!existingDate) {
+          return true;
+        }
+
+        if (
+          day(existingDate) !==
+          day(r.event_date)
+        ) {
+          return false;
+        }
+
+        if (
+          existingDate.length <= 10 ||
+          midnight(existingDate)
+        ) {
+          return true;
+        }
+
+        const oldTime = Date.parse(
+          existingDate
+        );
+
+        const newTime = Date.parse(
+          r.event_date
+        );
+
+        if (!Number.isFinite(oldTime)) {
+          return true;
+        }
+
+        return oldTime === newTime;
+      }
+    );
+
+    if (historicalRisk) {
+      return {
+        ...r,
+        status:
+          "review_possible_legacy_duplicate"
+      };
+    }
+
+    return {
+      ...r,
+      status: "eligible",
+
+      person_id:
+        matchingPeople[0]?.id || "",
+
+      person_action:
+        matchingPeople.length
+          ? "reuse"
+          : "create"
+    };
+  }
+
+  // =====================================
+  // BUILD AUTOMATIC IMPORT PLAN
+  // =====================================
+
+  const seen = new Set();
+
+  const reviewed = prepared.map(source => {
+    const id = str(
+      source.registration_id
+    );
+
+    if (!id || seen.has(id)) {
+      throw new Error(
+        "Missing or repeated Registration ID."
+      );
+    }
+
+    seen.add(id);
+
+    return classify(source);
+  });
+
+  const eligible = reviewed
+    .filter(
+      record => record.status === "eligible"
+    )
+    .sort(
+      (a, b) =>
+        a.registration_id.localeCompare(
+          b.registration_id
+        )
+    );
+
+  const planned = eligible.slice(
+    0,
+    MAX_NEW_VOLUNTEERS_PER_RUN
+  );
+
+  const imported = [];
+  const skipped = [];
+
+  let writes = 0;
+  let phonesCreated = 0;
+  let phonesUpdated = 0;
+  let volunteerChecksCreated = 0;
+  let volunteerChecksUpdated = 0;
+
+  // =====================================
+  // EXISTING PERSON: FILL MISSING FIELDS
+  // =====================================
+
+  async function fillMissingVolunteerFields(
+    person,
+    phone
+  ) {
+    // Recheck the latest Airtable record.
+    const fresh = await request(
+      "GET",
+      "People",
+      null,
+      null,
+      person.id
+    );
+
+    if (
+      fresh.id !== person.id ||
+      norm(field(fresh, "Email")) !==
+      norm(field(person, "Email"))
+    ) {
+      throw new Error(
+        "People record changed; manual review required."
+      );
+    }
+
+    const updates = {};
+
+    // Check Volunteer? if not already checked.
+    if (
+      field(fresh, VOLUNTEER_FIELD) !== true
+    ) {
+      updates[VOLUNTEER_FIELD] = true;
+    }
+
+    // Fill phone only when currently blank.
+    if (
+      str(phone) &&
+      !str(field(fresh, PHONE_FIELD))
+    ) {
+      updates[PHONE_FIELD] = str(phone);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      indexPerson(fresh);
+      return fresh;
+    }
+
+    // One PATCH updates only the required fields.
+    const updated = await request(
+      "PATCH",
+      "People",
+      {
+        fields: updates
+      },
+      null,
+      person.id
+    );
+
+    writes++;
+
+    if (updates[PHONE_FIELD]) {
+      phonesUpdated++;
+    }
+
+    if (updates[VOLUNTEER_FIELD]) {
+      volunteerChecksUpdated++;
+    }
+
+    indexPerson(updated);
+
+    return updated;
+  }
+
+  // =====================================
+  // AUTOMATIC IMPORT
+  // =====================================
+
+  if (MODE === "AUTO") {
+    for (const selected of planned) {
+
+      // Recheck current in-memory data.
+      const current = classify(selected);
+
+      if (current.status !== "eligible") {
+        skipped.push({
+          registration_id:
+            selected.registration_id,
+          reason: current.status
+        });
+
+        continue;
+      }
+
+      // =====================================
+      // FRESH REGISTRATION ID CHECK
+      // =====================================
+
+      const freshMatches =
+        await freshRegistrationLookup(
+          selected.registration_id
+        );
+
+      if (freshMatches.length > 0) {
+        for (const record of freshMatches) {
+          if (
+            !volunteers.some(
+              v => v.id === record.id
+            )
+          ) {
+            volunteers.push(record);
+          }
+        }
+
+        skipped.push({
+          registration_id:
+            selected.registration_id,
+          reason:
+            "already_exists_in_fresh_airtable_check"
+        });
+
+        continue;
+      }
+
+      // =====================================
+      // FRESH PEOPLE EMAIL CHECK
+      // =====================================
+
+      const freshPeople =
+        await freshPeopleLookup(
+          selected.email
+        );
+
+      if (freshPeople.length > 1) {
+        skipped.push({
+          registration_id:
+            selected.registration_id,
+          reason:
+            "multiple_matching_people"
+        });
+
+        continue;
+      }
+
+      let person = freshPeople[0];
+
+      if (person) {
+        indexPerson(person);
+      }
+
+      // =====================================
+      // CREATE PERSON IF MISSING
+      // =====================================
+
+      if (!person) {
+        const parts =
+          selected.name.split(/\s+/);
+
+        const firstName =
+          parts.shift() || "";
+
+        const lastName =
+          parts.join(" ");
+
+        const personFields = {
+          "Full Name": selected.name,
+          "First Name": firstName,
+          "Last Name": lastName,
+          "Email": selected.email,
+          [VOLUNTEER_FIELD]: true
+        };
+
+        if (selected.phone) {
+          personFields[PHONE_FIELD] =
+            selected.phone;
+        }
+
+        person = await request(
+          "POST",
+          "People",
+          {
+            fields: personFields
+          }
+        );
+
+        writes++;
+        volunteerChecksCreated++;
+
+        if (selected.phone) {
+          phonesCreated++;
+        }
+
+        people.push(person);
+        indexPerson(person);
+
+      } else {
+
+        // =====================================
+        // UPDATE EXISTING PERSON
+        // =====================================
+
+        person = await fillMissingVolunteerFields(
+          person,
+          selected.phone
+        );
+      }
+
+      // =====================================
+      // FINAL FRESH DUPLICATE CHECK
+      // =====================================
+
+      const finalMatches =
+        await freshRegistrationLookup(
+          selected.registration_id
+        );
+
+      if (finalMatches.length > 0) {
+        skipped.push({
+          registration_id:
+            selected.registration_id,
+          reason:
+            "registration_appeared_before_write"
+        });
+
+        continue;
+      }
+
+      // =====================================
+      // UPSERT VOLUNTEER BY REGISTRATION ID
+      // =====================================
+
+      const upsertResult = await request(
+        "PATCH",
+        "Volunteers",
+        {
+          performUpsert: {
+            fieldsToMergeOn: [
+              "Registration ID"
+            ]
+          },
+          records: [
+            {
+              fields: {
+                "Signup ID":
+                  selected.signup_id,
+
+                "Person":
+                  [person.id],
+
+                "Event Name":
+                  selected.event_name,
+
+                "Volunteer Date":
+                  selected.event_date,
+
+                "Role / Slot":
+                  selected.role,
+
+                "Registration ID":
+                  selected.registration_id,
+
+                "Source":
+                  "SignUpGenius"
+              }
+            }
+          ]
+        }
+      );
+
+      const volunteer =
+        upsertResult.records?.[0];
+
+      if (!volunteer?.id) {
+        throw new Error(
+          "Airtable upsert returned no record."
+        );
+      }
+
+      const wasCreated =
+        (upsertResult.createdRecords || [])
+          .includes(volunteer.id);
+
+      const wasUpdated =
+        (upsertResult.updatedRecords || [])
+          .includes(volunteer.id);
+
+      if (!wasCreated && !wasUpdated) {
+        throw new Error(
+          "Airtable upsert returned no " +
+          "creation/update status."
+        );
+      }
+
+      if (wasUpdated) {
+        skipped.push({
+          registration_id:
+            selected.registration_id,
+
+          reason:
+            "existing_registration_updated_by_upsert"
+        });
+
+        volunteers.push(volunteer);
+        continue;
+      }
+
+      writes++;
+      volunteers.push(volunteer);
+
+      imported.push({
+        registration_id:
+          selected.registration_id,
+
+        person_id:
+          person.id,
+
+        volunteer_id:
+          volunteer.id
+      });
+    }
+  }
+
+  // =====================================
+  // FINAL RESULTS
+  // =====================================
+
+  return {
+    status:
+      MODE === "PREVIEW"
+        ? "automatic_preview_no_writes"
+        : "automatic_import_run_complete",
+
+    mode: MODE,
+
+    prepared_count:
+      prepared.length,
+
+    people_checked:
+      people.length,
+
+    volunteers_checked:
+      volunteers.length,
+
+    already_imported_count:
+      reviewed.filter(
+        r => r.status === "already_imported"
+      ).length,
+
+    eligible_count:
+      eligible.length,
+
+    review_count:
+      reviewed.filter(
+        r => r.status.startsWith("review_")
+      ).length,
+
+    planned_this_run_count:
+      planned.length,
+
+    remaining_after_this_run_estimate:
+      Math.max(
+        0,
+        eligible.length - imported.length
+      ),
+
+    planned_with_phone_count:
+      planned.filter(
+        r => Boolean(r.phone)
+      ).length,
+
+    planned_existing_people_unchecked_count:
+      planned.filter(
+        r =>
+          r.person_id &&
+          byPersonId.get(r.person_id) &&
+          field(
+            byPersonId.get(r.person_id),
+            VOLUNTEER_FIELD
+          ) !== true
+      ).length,
+
+    phones_added_for_new_people:
+      phonesCreated,
+
+    phones_filled_for_existing_people:
+      phonesUpdated,
+
+    volunteer_checks_for_new_people:
+      volunteerChecksCreated,
+
+    volunteer_checks_for_existing_people:
+      volunteerChecksUpdated,
+
+    preview_first_five_json:
+      JSON.stringify(
+        planned.map(
+          ({ phone, ...rest }) => ({
+            ...rest,
+            has_phone: Boolean(phone)
+          })
+        )
+      ),
+
+    review_json:
+      JSON.stringify(
+        reviewed
+          .filter(
+            r => r.status.startsWith("review_")
+          )
+          .map(
+            ({ phone, ...rest }) => rest
+          )
+      ),
+
+    imported_json:
+      JSON.stringify(imported),
+
+    skipped_json:
+      JSON.stringify(skipped),
+
+    writes_performed:
+      writes
+  };
+}
+
 
